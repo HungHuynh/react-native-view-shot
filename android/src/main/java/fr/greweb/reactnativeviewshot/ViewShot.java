@@ -20,6 +20,10 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 
+import javax.microedition.khronos.egl.EGL10;
+import javax.microedition.khronos.egl.EGLContext;
+import javax.microedition.khronos.opengles.GL10;
+
 /**
  * Snapshot utility class allow to screenshot a view.
  */
@@ -70,6 +74,41 @@ public class ViewShot implements UIBlock {
             return;
         }
         try {
+
+            /* Antonio Edit Start */
+
+            private interface BitmapReadyCallbacks {
+                void onBitmapReady(Bitmap bitmap);
+            }
+
+            /* Usage code
+               captureBitmap(new BitmapReadyCallbacks() {
+
+                    @Override
+                    public void onBitmapReady(Bitmap bitmap) {
+                        someImageView.setImageBitmap(bitmap);
+                    }
+               });
+            */
+
+            view.queueEvent(new Runnable() { // TODO Add cast for view variable to GLSurfaceView
+                @Override
+                public void run() {
+                    EGL10 egl = (EGL10) EGLContext.getEGL();
+                    GL10 gl = (GL10)egl.eglGetCurrentContext().getGL();
+                    Bitmap snapshotBitmap = createBitmapFromGLSurface(0, 0, view.getWidth(), view.getHeight(), gl);
+
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            bitmapReadyCallbacks.onBitmapReady(snapshotBitmap);
+                        }
+                    });
+                }
+            });
+
+            /* Antonio Edit End */
+
             if ("file".equals(result)) {
                 os = new FileOutputStream(output);
                 captureView(view, os);
@@ -143,4 +182,39 @@ public class ViewShot implements UIBlock {
         }
         bitmap.compress(format, (int)(100.0 * quality), os);
     }
+
+
+    /* Antonio Edit Start */
+
+    // from other answer in this question
+    private Bitmap createBitmapFromGLSurface(int x, int y, int w, int h, GL10 gl) {
+
+        int bitmapBuffer[] = new int[w * h];
+        int bitmapSource[] = new int[w * h];
+        IntBuffer intBuffer = IntBuffer.wrap(bitmapBuffer);
+        intBuffer.position(0);
+
+        try {
+            gl.glReadPixels(x, y, w, h, GL10.GL_RGBA, GL10.GL_UNSIGNED_BYTE, intBuffer);
+            int offset1, offset2;
+            for (int i = 0; i < h; i++) {
+                offset1 = i * w;
+                offset2 = (h - i - 1) * w;
+                for (int j = 0; j < w; j++) {
+                    int texturePixel = bitmapBuffer[offset1 + j];
+                    int blue = (texturePixel >> 16) & 0xff;
+                    int red = (texturePixel << 16) & 0x00ff0000;
+                    int pixel = (texturePixel & 0xff00ff00) | red | blue;
+                    bitmapSource[offset2 + j] = pixel;
+                }
+            }
+        } catch (GLException e) {
+            Log.e(TAG, "createBitmapFromGLSurface: " + e.getMessage(), e);
+            return null;
+        }
+
+        return Bitmap.createBitmap(bitmapSource, w, h, Config.ARGB_8888);
+    }
+
+    /* Antonio Edit End */
 }
