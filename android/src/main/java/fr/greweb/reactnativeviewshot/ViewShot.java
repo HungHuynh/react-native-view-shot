@@ -13,6 +13,7 @@ import android.view.ViewGroup;
 import android.view.SurfaceView;
 import android.opengl.GLSurfaceView;
 import android.opengl.GLException;
+import android.opengl.GLES20;
 import android.widget.ScrollView;
 import android.util.Log;
 
@@ -25,6 +26,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.lang.reflect.InvocationTargetException;
 import 	java.nio.IntBuffer;
 
 import javax.microedition.khronos.egl.EGL10;
@@ -87,9 +89,7 @@ public class ViewShot implements UIBlock {
         try {
             // Hard code solution for webrtc RTCView
             if (view.getClass().getName().equals("com.oney.WebRTCModule.WebRTCView")) {
-                Log.i("RNViewShot", "-----------------------WebRTCView shot");
                 final SurfaceView sw = (SurfaceView) ((ViewGroup) view).getChildAt(0);
-                Log.i("RNViewShot", "-----------------------"+sw.toString());
                 final BitmapReadyCallbacks bitmapReadyCallbacks = new BitmapReadyCallbacks() {
                     @Override
                     public void onBitmapReady(Bitmap bitmap) {
@@ -101,23 +101,15 @@ public class ViewShot implements UIBlock {
                     }
                 };
 
-                sw.post(new Runnable() { // TODO Add cast for view variable to GLSurfaceView
+                sw.post(new Runnable() {
                     @Override
                     public void run() {
-                        runOnRenderThread(new Runable () {
-                            Log.i("RNViewShot","-----------------------in SurfView queue");
-                                EGL10 egl = (EGL10) EGLContext.getEGL();
-                                GL10 gl = (GL10) egl.eglGetCurrentContext().getGL();
-                                final Bitmap snapshotBitmap = createBitmapFromGLSurface(0, 0, sw.getWidth(), sw.getHeight(), gl);
-                            Log.i("RNViewShot","-----------------------Bitmap created");
-
-                                //runOnUiThread(new Runnable() {
-                                //    @Override
-                                //    public void run() {
+                        try {
+                            final Bitmap snapshotBitmap = (Bitmap) Class.forName("com.oney.WebRTCModule.SurfaceViewRenderer").getMethod("createBitmapFromPendingFrame").invoke(sw);
                             bitmapReadyCallbacks.onBitmapReady(snapshotBitmap);
-                                //    }
-                                //});
-                        });
+                        } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException | InvocationTargetException e){
+                            promise.reject(ERROR_UNABLE_TO_SNAPSHOT, "Class not found runtime error");
+                        }
                     }
                 });
             }
@@ -193,41 +185,4 @@ public class ViewShot implements UIBlock {
         }
         bitmap.compress(format, (int)(100.0 * quality), os);
     }
-
-
-    /* Antonio Edit Start */
-
-    // from other answer in this question
-    private Bitmap createBitmapFromGLSurface(int x, int y, int w, int h, GL10 gl) {
-
-        int bitmapBuffer[] = new int[w * h];
-        int bitmapSource[] = new int[w * h];
-        IntBuffer intBuffer = IntBuffer.wrap(bitmapBuffer);
-        intBuffer.position(0);
-
-        Log.d("RNViewShot_GLSurface", "____________________" + x + "," + y + "," + w + "," + h + "," + pendingFrame)
-
-        try {
-            gl.glReadPixels(x, y, w, h, GL10.GL_RGBA, GL10.GL_UNSIGNED_BYTE, intBuffer);
-            int offset1, offset2;
-            for (int i = 0; i < h; i++) {
-                offset1 = i * w;
-                offset2 = (h - i - 1) * w;
-                for (int j = 0; j < w; j++) {
-                    int texturePixel = bitmapBuffer[offset1 + j];
-                    int blue = (texturePixel >> 16) & 0xff;
-                    int red = (texturePixel << 16) & 0x00ff0000;
-                    int pixel = 0xFF00FF; //(texturePixel & 0xff00ff00) | red | blue;
-                    bitmapSource[offset2 + j] = pixel;
-                }
-            }
-        } catch (GLException e) {
-            Log.e("RNViewShot", "createBitmapFromGLSurface: " + e.getMessage(), e);
-            return null;
-        }
-
-        return Bitmap.createBitmap(bitmapSource, w, h, Bitmap.Config.ARGB_8888);
-    }
-
-    /* Antonio Edit End */
 }
