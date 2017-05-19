@@ -6,9 +6,15 @@ import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.net.Uri;
+import android.os.Handler;
 import android.util.Base64;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.SurfaceView;
+import android.opengl.GLSurfaceView;
+import android.opengl.GLException;
 import android.widget.ScrollView;
+import android.util.Log;
 
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.uimanager.NativeViewHierarchyManager;
@@ -19,6 +25,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import 	java.nio.IntBuffer;
 
 import javax.microedition.khronos.egl.EGL10;
 import javax.microedition.khronos.egl.EGLContext;
@@ -27,8 +34,8 @@ import javax.microedition.khronos.opengles.GL10;
 /**
  * Snapshot utility class allow to screenshot a view.
  */
-public class ViewShot implements UIBlock {
 
+public class ViewShot implements UIBlock {
     static final String ERROR_UNABLE_TO_SNAPSHOT = "E_UNABLE_TO_SNAPSHOT";
 
     private int tag;
@@ -43,16 +50,16 @@ public class ViewShot implements UIBlock {
     private Boolean snapshotContentContainer;
 
     public ViewShot(
-            int tag,
-            String extension,
-            Bitmap.CompressFormat format,
-            double quality,
-            @Nullable Integer width,
-            @Nullable Integer height,
-            File output,
-            String result,
-            Boolean snapshotContentContainer,
-            Promise promise) {
+      int tag,
+      String extension,
+      Bitmap.CompressFormat format,
+      double quality,
+      @Nullable Integer width,
+      @Nullable Integer height,
+      File output,
+      String result,
+      Boolean snapshotContentContainer,
+      Promise promise) {
         this.tag = tag;
         this.extension = extension;
         this.format = format;
@@ -65,6 +72,10 @@ public class ViewShot implements UIBlock {
         this.promise = promise;
     }
 
+    private interface BitmapReadyCallbacks{
+        void onBitmapReady(Bitmap bitmap);
+    }
+
     @Override
     public void execute(NativeViewHierarchyManager nativeViewHierarchyManager) {
         OutputStream os = null;
@@ -74,64 +85,64 @@ public class ViewShot implements UIBlock {
             return;
         }
         try {
-
-            /* Antonio Edit Start */
-
-            private interface BitmapReadyCallbacks {
-                void onBitmapReady(Bitmap bitmap);
-            }
-
-            /* Usage code
-               captureBitmap(new BitmapReadyCallbacks() {
-
+            // Hard code solution for webrtc RTCView
+            if (view.getClass().getName().equals("com.oney.WebRTCModule.WebRTCView")) {
+                Log.i("RNViewShot", "-----------------------WebRTCView shot");
+                final SurfaceView sw = (SurfaceView) ((ViewGroup) view).getChildAt(0);
+                Log.i("RNViewShot", "-----------------------"+sw.toString());
+                final BitmapReadyCallbacks bitmapReadyCallbacks = new BitmapReadyCallbacks() {
                     @Override
                     public void onBitmapReady(Bitmap bitmap) {
-                        someImageView.setImageBitmap(bitmap);
+                        OutputStream os = new ByteArrayOutputStream();
+                        bitmap.compress(format, (int)(100.0 * quality), os);
+                        byte[] bytes = ((ByteArrayOutputStream) os).toByteArray();
+                        final String data = "data:image/"+extension+";base64," + Base64.encodeToString(bytes, Base64.NO_WRAP);
+                        promise.resolve(data);
                     }
-               });
-            */
+                };
 
-            view.queueEvent(new Runnable() { // TODO Add cast for view variable to GLSurfaceView
-                @Override
-                public void run() {
-                    EGL10 egl = (EGL10) EGLContext.getEGL();
-                    GL10 gl = (GL10)egl.eglGetCurrentContext().getGL();
-                    Bitmap snapshotBitmap = createBitmapFromGLSurface(0, 0, view.getWidth(), view.getHeight(), gl);
+                sw.post(new Runnable() { // TODO Add cast for view variable to GLSurfaceView
+                    @Override
+                    public void run() {
+                        runOnRenderThread(new Runable () {
+                            Log.i("RNViewShot","-----------------------in SurfView queue");
+                                EGL10 egl = (EGL10) EGLContext.getEGL();
+                                GL10 gl = (GL10) egl.eglGetCurrentContext().getGL();
+                                final Bitmap snapshotBitmap = createBitmapFromGLSurface(0, 0, sw.getWidth(), sw.getHeight(), gl);
+                            Log.i("RNViewShot","-----------------------Bitmap created");
 
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
+                                //runOnUiThread(new Runnable() {
+                                //    @Override
+                                //    public void run() {
                             bitmapReadyCallbacks.onBitmapReady(snapshotBitmap);
-                        }
-                    });
-                }
-            });
-
-            /* Antonio Edit End */
-
-            if ("file".equals(result)) {
-                os = new FileOutputStream(output);
-                captureView(view, os);
-                String uri = Uri.fromFile(output).toString();
-                promise.resolve(uri);
-            }
-            else if ("base64".equals(result)) {
-                os = new ByteArrayOutputStream();
-                captureView(view, os);
-                byte[] bytes = ((ByteArrayOutputStream) os).toByteArray();
-                String data = Base64.encodeToString(bytes, Base64.NO_WRAP);
-                promise.resolve(data);
-            }
-            else if ("data-uri".equals(result)) {
-                os = new ByteArrayOutputStream();
-                captureView(view, os);
-                byte[] bytes = ((ByteArrayOutputStream) os).toByteArray();
-                String data = Base64.encodeToString(bytes, Base64.NO_WRAP);
-                data = "data:image/"+extension+";base64," + data;
-                promise.resolve(data);
+                                //    }
+                                //});
+                        });
+                    }
+                });
             }
             else {
-                promise.reject(ERROR_UNABLE_TO_SNAPSHOT, "Unsupported result: "+result+". Try one of: file | base64 | data-uri");
+                if ("file".equals(result)) {
+                    os = new FileOutputStream(output);
+                    captureView(view, os);
+                    String uri = Uri.fromFile(output).toString();
+                    promise.resolve(uri);
+                } else if ("base64".equals(result)) {
+                    os = new ByteArrayOutputStream();
+                    captureView(view, os);
+                    byte[] bytes = ((ByteArrayOutputStream) os).toByteArray();
+                    String data = Base64.encodeToString(bytes, Base64.NO_WRAP);
+                    promise.resolve(data);
+                } else if ("data-uri".equals(result)) {
+                    os = new ByteArrayOutputStream();
+                    captureView(view, os);
+                    byte[] bytes = ((ByteArrayOutputStream) os).toByteArray();
+                    String data = Base64.encodeToString(bytes, Base64.NO_WRAP);
+                    data = "data:image/" + extension + ";base64," + data;
+                    promise.resolve(data);
+                } else {
+                    promise.reject(ERROR_UNABLE_TO_SNAPSHOT, "Unsupported result: " + result + ". Try one of: file | base64 | data-uri");
+                }
             }
         }
         catch (Exception e) {
@@ -194,6 +205,8 @@ public class ViewShot implements UIBlock {
         IntBuffer intBuffer = IntBuffer.wrap(bitmapBuffer);
         intBuffer.position(0);
 
+        Log.d("RNViewShot_GLSurface", "____________________" + x + "," + y + "," + w + "," + h + "," + pendingFrame)
+
         try {
             gl.glReadPixels(x, y, w, h, GL10.GL_RGBA, GL10.GL_UNSIGNED_BYTE, intBuffer);
             int offset1, offset2;
@@ -204,16 +217,16 @@ public class ViewShot implements UIBlock {
                     int texturePixel = bitmapBuffer[offset1 + j];
                     int blue = (texturePixel >> 16) & 0xff;
                     int red = (texturePixel << 16) & 0x00ff0000;
-                    int pixel = (texturePixel & 0xff00ff00) | red | blue;
+                    int pixel = 0xFF00FF; //(texturePixel & 0xff00ff00) | red | blue;
                     bitmapSource[offset2 + j] = pixel;
                 }
             }
         } catch (GLException e) {
-            Log.e(TAG, "createBitmapFromGLSurface: " + e.getMessage(), e);
+            Log.e("RNViewShot", "createBitmapFromGLSurface: " + e.getMessage(), e);
             return null;
         }
 
-        return Bitmap.createBitmap(bitmapSource, w, h, Config.ARGB_8888);
+        return Bitmap.createBitmap(bitmapSource, w, h, Bitmap.Config.ARGB_8888);
     }
 
     /* Antonio Edit End */
