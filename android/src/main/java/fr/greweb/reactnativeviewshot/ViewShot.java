@@ -27,7 +27,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
-import 	java.nio.IntBuffer;
+import  java.nio.IntBuffer;
 
 import javax.microedition.khronos.egl.EGL10;
 import javax.microedition.khronos.egl.EGLContext;
@@ -39,7 +39,7 @@ import javax.microedition.khronos.opengles.GL10;
 
 public class ViewShot implements UIBlock {
     static final String ERROR_UNABLE_TO_SNAPSHOT = "E_UNABLE_TO_SNAPSHOT";
-
+    
     private int tag;
     private String extension;
     private Bitmap.CompressFormat format;
@@ -50,18 +50,18 @@ public class ViewShot implements UIBlock {
     private String result;
     private Promise promise;
     private Boolean snapshotContentContainer;
-
+    
     public ViewShot(
-      int tag,
-      String extension,
-      Bitmap.CompressFormat format,
-      double quality,
-      @Nullable Integer width,
-      @Nullable Integer height,
-      File output,
-      String result,
-      Boolean snapshotContentContainer,
-      Promise promise) {
+                    int tag,
+                    String extension,
+                    Bitmap.CompressFormat format,
+                    double quality,
+                    @Nullable Integer width,
+                    @Nullable Integer height,
+                    File output,
+                    String result,
+                    Boolean snapshotContentContainer,
+                    Promise promise) {
         this.tag = tag;
         this.extension = extension;
         this.format = format;
@@ -73,11 +73,7 @@ public class ViewShot implements UIBlock {
         this.snapshotContentContainer = snapshotContentContainer;
         this.promise = promise;
     }
-
-    private interface BitmapReadyCallbacks{
-        void onBitmapReady(Bitmap bitmap);
-    }
-
+    
     @Override
     public void execute(NativeViewHierarchyManager nativeViewHierarchyManager) {
         OutputStream os = null;
@@ -90,28 +86,34 @@ public class ViewShot implements UIBlock {
             // Hard code solution for webrtc RTCView
             if (view.getClass().getName().equals("com.oney.WebRTCModule.WebRTCView")) {
                 final SurfaceView sw = (SurfaceView) ((ViewGroup) view).getChildAt(0);
-                final BitmapReadyCallbacks bitmapReadyCallbacks = new BitmapReadyCallbacks() {
-                    @Override
-                    public void onBitmapReady(Bitmap bitmap) {
-                        OutputStream os = new ByteArrayOutputStream();
-                        bitmap.compress(format, (int)(100.0 * quality), os);
-                        byte[] bytes = ((ByteArrayOutputStream) os).toByteArray();
-                        final String data = "data:image/"+extension+";base64," + Base64.encodeToString(bytes, Base64.NO_WRAP);
-                        promise.resolve(data);
+                
+                try {
+                    final Object capturedSignal = Class.forName("com.oney.WebRTCModule.SurfaceViewRenderer")
+                    .getMethod("getCapturedSignal")
+                    .invoke(sw);
+                    
+                    Class.forName("com.oney.WebRTCModule.SurfaceViewRenderer")
+                    .getMethod("createBitmapFromFrame")
+                    .invoke(sw);
+                    
+                    Log.d("RNViewShotHack", "Waiting for captured done");
+                    synchronized (capturedSignal) {
+                        capturedSignal.wait();
+                        Log.d("RNViewShotHack", "Captured done waiting");
                     }
-                };
-
-                sw.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            final Bitmap snapshotBitmap = (Bitmap) Class.forName("com.oney.WebRTCModule.SurfaceViewRenderer").getMethod("createBitmapFromPendingFrame").invoke(sw);
-                            bitmapReadyCallbacks.onBitmapReady(snapshotBitmap);
-                        } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException | InvocationTargetException e){
-                            promise.reject(ERROR_UNABLE_TO_SNAPSHOT, "Class not found runtime error");
-                        }
-                    }
-                });
+                    
+                    Bitmap capturedBitmap = (Bitmap) Class.forName("com.oney.WebRTCModule.SurfaceViewRenderer")
+                    .getMethod("getCapturedBitmap")
+                    .invoke(sw);
+                    
+                    os = new ByteArrayOutputStream();
+                    capturedBitmap.compress(format, (int)(100.0 * quality), os);
+                    byte[] bytes = ((ByteArrayOutputStream) os).toByteArray();
+                    final String data = "data:image/"+extension+";base64," + Base64.encodeToString(bytes, Base64.NO_WRAP);
+                    promise.resolve(data);
+                } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException | InvocationTargetException e){
+                    promise.reject(ERROR_UNABLE_TO_SNAPSHOT, "Class not found runtime error");
+                }
             }
             else {
                 if ("file".equals(result)) {
@@ -151,7 +153,7 @@ public class ViewShot implements UIBlock {
             }
         }
     }
-
+    
     /**
      * Screenshot a view and return the captured bitmap.
      * @param view the view to capture
@@ -160,11 +162,11 @@ public class ViewShot implements UIBlock {
     private void captureView (View view, OutputStream os) {
         int w = view.getWidth();
         int h = view.getHeight();
-
+        
         if (w <= 0 || h <= 0) {
             throw new RuntimeException("Impossible to snapshot the view: view is invalid");
         }
-
+        
         //evaluate real height
         if (snapshotContentContainer) {
             h=0;
@@ -176,7 +178,7 @@ public class ViewShot implements UIBlock {
         Bitmap bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(bitmap);
         view.draw(c);
-
+        
         if (width != null && height != null && (width != w || height != h)) {
             bitmap = Bitmap.createScaledBitmap(bitmap, width, height, true);
         }
